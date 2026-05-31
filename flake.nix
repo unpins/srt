@@ -39,13 +39,17 @@
       # mingw drops srt-tunnel (upstream: no C++11 <thread>), so Windows
       # ships a 2-applet multicall. The apps are C++ → force the runtime
       # static so the .exe carries no libstdc++-6/libgcc_s/libmcfgthread
-      # DLLs (same single-binary policy as x265).
+      # DLLs (same single-binary policy as x265). Drive the combined link
+      # through lld (-fuse-ld=lld): binutils 2.44 discards the cxx11 COMDAT
+      # members (basic_string::_M_dispose, std::ctype::do_widen, the exception
+      # typeinfos) in the combined PE link, leaving them undefined; lld's
+      # PE/COFF COMDAT handling links them cleanly. Same fix as heif.
       windowsBuild = pkgs:
         let cross = ulib.mingwStaticCross pkgs; in
         mk pkgs {
           pkgs = cross;
           srt = ulib.nativeFixes.srt cross;
-          extraLinkFlags = "-static -static-libgcc -static-libstdc++";
+          extraLinkFlags = "-static -static-libgcc -static-libstdc++ -fuse-ld=lld";
         };
     };
 }

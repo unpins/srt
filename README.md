@@ -54,5 +54,6 @@ The [Releases](https://github.com/unpins/srt/releases) page has standalone binar
 - **Single multicall binary** — the three apps are post-linked into one `srt`; applet names are recreated as `argv[0]` shims on install.
 - **mbedtls, not OpenSSL** — smaller crypto closure; AES-encrypted streams work unchanged.
 - **Windows:** `mingw` cross, single `.exe`, no companion DLLs. Ships 2 applets — upstream excludes `srt-tunnel` (no C++11 `<thread>`).
+- **No man pages** — SRT ships none; run any applet with `--help`.
 
 Platform fixes live in [`nix-lib/native-overlay/srt.nix`](https://github.com/unpins/nix-lib/blob/main/native-overlay/srt.nix); the multicall link recipe is in [`multicall.nix`](./multicall.nix).

@@ -10,34 +10,43 @@
 # are already an `add_library(... OBJECT)` virtual library that CMake
 # compiles ONCE and reuses for every app — so they DON'T collide. Each app's
 # own translation unit only clashes on `main` (all apps) plus
-# `OnINT_ForceExit(int)` (live + file define the same signal handler). A
-# per-app `objcopy --redefine-sym` (single-form, the only form llvm-objcopy
-# honours on Mach-O too) dissolves the set without touching the shared
-# objects:
+# `OnINT_ForceExit(int)` (live + file define the same signal handler):
 #
 #   1. Let CMake build normally — every app .o lands under
 #      CMakeFiles/<app>.dir/, the shared set under
 #      CMakeFiles/srtsupport_virtual.dir/.
-#   2. Rename each app's `main` → `<app>_main` (the one clash known a priori;
-#      the dispatcher needs distinct entry points anyway).
+#   2. Rename each app's `main` → `<app>_main` (the dispatcher needs distinct
+#      entry points), then localize the strong globals defined by ≥2 app
+#      objects — the genuine duplicates (`OnINT_ForceExit`). This reads mangled
+#      nm names directly, so it is robust for C++: the linker's clash report
+#      uses demangled names (`OnINT_ForceExit(int)`) that don't round-trip to
+#      the mangled symbol objcopy needs, and ld64's demangler isn't always on
+#      PATH — that was the darwin link failure. Same approach as heif.
 #   3. A small dispatcher.c (basename(argv[0]) → <app>_main, with an
 #      `srt <applet> [args]` fallback) is compiled and linked in.
-#   4. Link iteratively: reuse CMake's resolved link.txt for the first app
-#      verbatim (exact compiler, flags, shared objects, libsrt.a and
-#      per-target deps — mbedtls, -ldl/-latomic on linux, frameworks on
-#      darwin, winpthreads on mingw — in the right order), splice in the other
-#      apps' own objects + dispatcher.o, and rename the output. Each failed
-#      link names the remaining *strong* duplicates; we rename those per-app
-#      and relink. We trust the linker rather than predict clashes from nm:
-#      on COFF, nm reports COMDAT defs (typeinfo, vtables, `.refptr` thunks)
-#      as strong R/T, indistinguishable from real clashes, while the linker
-#      merges them silently. `extraLinkFlags` lets the Windows build force the
-#      C++ runtime static (single-binary policy).
+#   4. ONE link: reuse CMake's resolved link.txt for the first app verbatim
+#      (exact compiler, flags, shared objects, libsrt.a and per-target deps —
+#      mbedtls, -ldl/-latomic on linux, frameworks on darwin, winpthreads on
+#      mingw — in the right order), splice in the other apps' objects +
+#      dispatcher.o, retarget the output. No iterative pass — localize removed
+#      the duplicates. `extraLinkFlags` folds the C++ runtime static on
+#      windows/darwin (single-binary policy); the windows combined link runs
+#      through lld (binutils 2.44 drops cxx11 COMDAT members in a PE link), and
+#      darwin also hides the libc++ surface so dyld can't swap in the system
+#      copy (TMO crash). Both are the same fixes heif uses.
 { lib }:
 { pkgs, srt, extraLinkFlags ? "" }:
 let
+  # mingw: the combined multicall link is driven through lld (-fuse-ld=lld, set
+  # in windowsBuild) to dodge binutils 2.44's PE-COMDAT discard bug. The cross
+  # gcc driver invokes `ld.lld` from PATH; only this combined link uses it
+  # (CMake's per-app links keep binutils ld).
+  isMinGW = pkgs.stdenv.hostPlatform.isMinGW or false;
   multicall = srt.overrideAttrs (old: {
     pname = "srt-multi";
+
+    nativeBuildInputs = (old.nativeBuildInputs or [ ])
+      ++ lib.optional isMinGW pkgs.buildPackages.lld;
 
     # Re-enable the apps the library overlay turns off, and collapse to a
     # single output (we ship only the multicall binary, no lib/headers/.pc).
@@ -73,14 +82,38 @@ let
         up=""
       fi
 
-      # Rename each app's main → <app>_main so the dispatcher can reach them as
-      # distinct entry points. main is the one clash known a priori; any others
-      # are discovered from the linker in the iterative link below.
+      # Each app's main .cpp defines file-scope strong globals under shared
+      # names — `main` (all apps) and `OnINT_ForceExit` (live + file share the
+      # same signal handler) — so linking the mains together clashes on more
+      # than `main`. Rather than parse the linker's clash report (it prints
+      # demangled C++ names like `OnINT_ForceExit(int)` that don't round-trip
+      # back to the mangled nm symbol objcopy needs, and ld64's demangler isn't
+      # always on PATH — that was the darwin failure), rename each main →
+      # <app>_main, then localize ONLY the globals a tool object shares with
+      # another (the genuine duplicates). Each app keeps a private copy; unique
+      # globals and the weak/COMDAT C++ runtime symbols stay global so normal
+      # resolution is untouched. Same approach as heif/multicall.nix.
+      : > multicall/all.syms
       for a in "''${apps[@]}"; do
         san=$(echo "$a" | tr '-' '_')
-        $OBJCOPY --redefine-sym "''${up}main=''${up}''${san}_main" \
-          "CMakeFiles/$a.dir/apps/$a.cpp.$objext"
+        obj="CMakeFiles/$a.dir/apps/$a.cpp.$objext"
+        entry="''${up}''${san}_main"
+        $OBJCOPY --redefine-sym "''${up}main=$entry" "$obj"
+        # Strong defs only: uppercase nm type, minus weak/COMDAT (W/V), the
+        # entry point, and compiler helpers (a '.' in the name — never present
+        # in a C/C++ program or mangled _Z… symbol).
+        $NM --defined-only "$obj" \
+          | awk -v keep="$entry" '$2 ~ /^[A-Z]$/ && $2 != "W" && $2 != "V" && $3 != keep && index($3,".")==0 {print $3}' \
+          | sort -u >> multicall/all.syms
       done
+      # Symbols defined by ≥2 apps are the real clashes; localize just those.
+      sort multicall/all.syms | uniq -d > multicall/clash.syms
+      if [ -s multicall/clash.syms ]; then
+        for a in "''${apps[@]}"; do
+          $OBJCOPY --localize-symbols=multicall/clash.syms \
+            "CMakeFiles/$a.dir/apps/$a.cpp.$objext"
+        done
+      fi
 
       # Dispatcher: basename(argv[0]) → <app>_main, '.exe' stripped, plus an
       # `srt <applet> [args]` form so the bare binary stays callable.
@@ -136,21 +169,13 @@ CBODY
       } > multicall/dispatcher.c
       $CC -O2 -c -o multicall/dispatcher.o multicall/dispatcher.c
 
-      # Iterative link. Reuse the first app's resolved link.txt verbatim (exact
-      # compiler, flags, shared OBJECT-lib objects, libsrt.a and per-target
-      # deps in the right order); splice in the other apps' own objects +
-      # dispatcher.o and rename the output (the link.txt output token carries
-      # .exe on mingw, so split it off — we always emit multicall/srt).
-      #
-      # Each failed attempt names the *strong* duplicate symbols ("multiple
-      # definition" / "duplicate symbol"); weak/COMDAT defs merge silently. We
-      # trust the linker rather than predict from nm because on COFF nm reports
-      # COMDAT (typeinfo, vtables, .refptr thunks) as strong R/T, indistinct
-      # from real clashes. Rename each reported symbol in every app that
-      # defines it, then relink. -Wl,--no-demangle makes GNU ld print mangled
-      # names objcopy can consume (ld64 already prints raw symbols). For srt
-      # this converges in two passes: OnINT_ForceExit(int), shared by srt-live
-      # and srt-file, is the only clash beyond main.
+      # Reuse the first app's resolved link.txt verbatim (exact compiler, flags,
+      # shared OBJECT-lib objects, libsrt.a and per-target deps in the right
+      # order); splice in the other apps' own objects + dispatcher.o and rename
+      # the output (the link.txt output token carries .exe on mingw, so split it
+      # off — we always emit multicall/srt). The localize pass above made every
+      # app object export only its <app>_main, so a SINGLE link suffices — no
+      # iterative redefine, no demangling.
       template="''${apps[0]}"
       line=$(cat "CMakeFiles/$template.dir/link.txt")
       pre="''${line% -o *}"
@@ -161,50 +186,47 @@ CBODY
       for a in "''${apps[@]:1}"; do
         extra="$extra CMakeFiles/$a.dir/apps/$a.cpp.$objext"
       done
-      nodemangle=-Wl,--no-demangle
-      case "$($CC -dumpmachine)" in *darwin*) nodemangle="" ;; esac
 
-      # Demangler to map the linker's reported clash back to the raw nm symbol
-      # objcopy needs. GNU ld prints mangled names (--no-demangle above); ld64
-      # always prints demangled and has no flag to stop it, so each clash is
-      # matched against both the raw nm symbol and its demangled form. The
-      # toolchain ships the demangler next to nm.
-      nmdir=$(dirname "$(command -v ''${NM%% *})")
-      demangle=cat
-      for c in c++filt llvm-cxxfilt; do
-        if [ -x "$nmdir/$c" ]; then demangle="$nmdir/$c"; break; fi
-        command -v "$c" >/dev/null 2>&1 && { demangle=$c; break; }
-      done
+      # darwin: we fold static libc++/libc++abi in via extraLinkFlags, but libc++
+      # emits its symbols weak-external; at load dyld would coalesce them with the
+      # macOS 15 system libc++ (which uses typed-memory-operations) and run system
+      # code whose TMO static initializer never ran in our binary → abort. Hide the
+      # whole libc++/libc++abi surface (-unexported_symbols_list) so dyld keeps OUR
+      # static defs. An executable exports nothing, so this is safe. Same fix as
+      # heif/multicall.nix; patterns cover the Itanium mangling of std:: / __cxxabiv1
+      # / operators new+delete and their vtables/type_info.
+      darwin_link_extra=""
+      case "$($CC -dumpmachine)" in *darwin*)
+        cat > multicall/unexport.syms <<'EOF'
+        __Znw*
+        __Zna*
+        __Zdl*
+        __Zda*
+        __ZNSt*
+        __ZNKSt*
+        __ZNVSt*
+        __ZSt*
+        __ZTVSt*
+        __ZTVNSt*
+        __ZTISt*
+        __ZTINSt*
+        __ZTSSt*
+        __ZTSNSt*
+        __ZN10__cxxabiv1*
+        __ZNK10__cxxabiv1*
+        __ZTVN10__cxxabiv1*
+        __ZTIN10__cxxabiv1*
+        __ZTSN10__cxxabiv1*
+EOF
+        sed -i 's/^[[:space:]]*//' multicall/unexport.syms
+        darwin_link_extra="-Wl,-unexported_symbols_list,$PWD/multicall/unexport.syms"
+      ;; esac
 
-      converged=0
-      for _ in $(seq 1 30); do
-        if eval "$pre $extra multicall/dispatcher.o -o multicall/srt $libs $nodemangle ${extraLinkFlags}" 2>multicall/link.err; then
-          converged=1; break
-        fi
+      eval "$pre $extra multicall/dispatcher.o -o multicall/srt $libs $darwin_link_extra ${extraLinkFlags}" 2>multicall/link.err || {
         cat multicall/link.err >&2
-        sed -nE "s/.*multiple definition of [\`']([^']+)'.*/\1/p; s/.*duplicate symbol '([^']+)'.*/\1/p" \
-          multicall/link.err | sort -u > multicall/clash.syms
-        [ -s multicall/clash.syms ] || { echo "multicall: link failed without a duplicate-symbol diagnostic" >&2; exit 1; }
-        while IFS= read -r sym; do
-          hit=0
-          for a in "''${apps[@]}"; do
-            obj="CMakeFiles/$a.dir/apps/$a.cpp.$objext"
-            $NM --defined-only "$obj" | awk '{print $3}' > multicall/raw.syms
-            # ld64 demangles after stripping the Mach-O leading '_'; mirror that
-            # so the demangled column matches its report (a no-op on ELF, where
-            # the raw column matches the mangled report instead).
-            sed 's/^_//' multicall/raw.syms | $demangle > multicall/dem.syms
-            raw=$(paste multicall/raw.syms multicall/dem.syms \
-                  | awk -F'\t' -v s="$sym" '$1==s || $2==s {print $1; exit}')
-            [ -n "$raw" ] || continue
-            san=$(echo "$a" | tr '-' '_')
-            $OBJCOPY --redefine-sym "$raw=''${up}''${san}__''${raw#"$up"}" "$obj"
-            hit=1
-          done
-          [ "$hit" = 1 ] || { echo "multicall: clashing symbol '$sym' not defined by any app object" >&2; exit 1; }
-        done < multicall/clash.syms
-      done
-      [ "$converged" = 1 ] || { echo "multicall: link did not converge in 30 passes" >&2; exit 1; }
+        echo "multicall: combined link failed (unexpected strong duplicate left after localize?)" >&2
+        exit 1
+      }
 
       # mingw g++ auto-appends .exe to the link output; normalize to the
       # suffixless name installPhase and withAliases expect (the Windows
