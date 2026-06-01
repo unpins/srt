@@ -115,58 +115,11 @@ let
         done
       fi
 
-      # Dispatcher: basename(argv[0]) → <app>_main, '.exe' stripped, plus an
-      # `srt <applet> [args]` form so the bare binary stays callable.
-      {
-        echo '#include <string.h>'
-        echo '#include <stdio.h>'
-        for a in "''${apps[@]}"; do
-          san=$(echo "$a" | tr '-' '_')
-          echo "int ''${san}_main(int, char **);"
-        done
-        echo 'struct applet { const char *name; int (*fn)(int, char **); };'
-        echo 'static const struct applet applets[] = {'
-        for a in "''${apps[@]}"; do
-          san=$(echo "$a" | tr '-' '_')
-          echo "    {\"$a\", ''${san}_main},"
-        done
-        cat <<'CBODY'
-    {0, 0}
-};
-static void copy_basename(char *dst, size_t cap, const char *src) {
-    const char *p = src, *s;
-    s = strrchr(p, '/'); if (s) p = s + 1;
-#ifdef _WIN32
-    s = strrchr(p, '\\'); if (s) p = s + 1;
-#endif
-    size_t n = strlen(p); if (n >= cap) n = cap - 1;
-    memcpy(dst, p, n); dst[n] = 0;
-    if (n > 4 && strcmp(dst + n - 4, ".exe") == 0) dst[n - 4] = 0;
-}
-static int usage(const char *a0) {
-    fprintf(stderr, "srt: multicall binary; usage: %s <applet> [args]\n", a0);
-    fprintf(stderr, "applets:");
-    for (const struct applet *a = applets; a->name; a++)
-        fprintf(stderr, " %s", a->name);
-    fprintf(stderr, "\n");
-    return 1;
-}
-int main(int argc, char **argv) {
-    char base[64];
-    const char *a0 = (argc > 0 && argv[0]) ? argv[0] : "srt";
-    copy_basename(base, sizeof base, a0);
-    if (strcmp(base, "srt") == 0) {
-        if (argc < 2) return usage(a0);
-        copy_basename(base, sizeof base, argv[1]);
-        argv++; argc--;
-    }
-    for (const struct applet *a = applets; a->name; a++)
-        if (strcmp(base, a->name) == 0) return a->fn(argc, argv);
-    fprintf(stderr, "srt: unknown applet '%s'\n", base);
-    return usage(a0);
-}
-CBODY
-      } > multicall/dispatcher.c
+      # Dispatcher (shared canonical generator — see nix-lib
+      # lib.multicallDispatcherC). It derives each app's C symbol from the applet
+      # name in multicall/apps.list via `tr -c 'A-Za-z0-9_' '_'`, matching the
+      # `tr '-' '_'` rename above (srt-live-transmit → srt_live_transmit).
+${lib.multicallDispatcherC { name = "srt"; }}
       $CC -O2 -c -o multicall/dispatcher.o multicall/dispatcher.c
 
       # Reuse the first app's resolved link.txt verbatim (exact compiler, flags,
