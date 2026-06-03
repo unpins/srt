@@ -9,32 +9,28 @@ Standalone build of the [SRT](https://github.com/Haivision/srt) (Secure Reliable
 
 Part of the [unpins](https://unpins.org) project — native single-binary builds with no third-party runtime dependencies.
 
-Low-latency, reliable transport of live streams over UDP. Ships as one multicall binary that dispatches to the upstream apps:
+Low-latency, reliable transport of live streams over UDP. Ships as one binary providing the upstream apps:
 
 - `srt-live-transmit` — bridge a live stream between SRT and UDP/file/stdout.
 - `srt-file-transmit` — transfer files over SRT.
 - `srt-tunnel` — tunnel a TCP connection over SRT (Linux / macOS only).
 
-Run an applet by name or via the dispatcher:
+## Usage
+
+Run a program with [unpin](https://github.com/unpins/unpin):
 
 ```bash
-srt-live-transmit udp://:1234 srt://example:4201   # by name
-srt live-transmit  udp://:1234 srt://example:4201   # via the srt dispatcher
+unpin srt srt-live-transmit udp://:1234 srt://example:4201
+unpin srt srt-file-transmit --help
 ```
 
-## Installation
-
-Install with [unpin](https://github.com/unpins/unpin):
+To install the programs onto your PATH:
 
 ```bash
-unpin srt
+unpin install srt
 ```
 
-Or run without installing:
-
-```bash
-unpin run srt -- srt-live-transmit --help
-```
+`unpin install srt` creates the `srt-live-transmit`, `srt-file-transmit`, and `srt-tunnel` commands (`srt-tunnel` on Linux / macOS only).
 
 ## Build locally
 
