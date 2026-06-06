@@ -24,13 +24,11 @@ unpin srt srt-live-transmit udp://:1234 srt://example:4201
 unpin srt srt-file-transmit --help
 ```
 
-To install the programs onto your PATH:
+`unpin install srt` also creates the commands `srt-live-transmit`, `srt-file-transmit` and `srt-tunnel` (the last on Linux / macOS only):
 
 ```bash
 unpin install srt
 ```
-
-`unpin install srt` creates the `srt-live-transmit`, `srt-file-transmit`, and `srt-tunnel` commands (`srt-tunnel` on Linux / macOS only).
 
 ## Build locally
 
