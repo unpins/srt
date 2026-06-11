@@ -20,6 +20,7 @@
     in
     ulib.mkStandaloneFlake {
       inherit self;
+      dnsFallback = true; # resolves hostnames; opt into the Android DNS fallback
       name = "srt";
 
       # The apps are C++. On darwin clang++ links /usr/lib/libc++.1.dylib
