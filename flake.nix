@@ -1,5 +1,5 @@
 {
-  description = "Standalone build of srt apps (Secure Reliable Transport)";
+  description = "the SRT (Secure Reliable Transport) CLI apps as a single self-contained binary";
 
   nixConfig = {
     extra-substituters = [ "https://unpins.cachix.org" ];

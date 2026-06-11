@@ -2,7 +2,7 @@
 
 The [SRT](https://github.com/Haivision/srt) (Secure Reliable Transport) command-line apps, as a single self-contained binary built natively for Linux, macOS, and Windows.
 
-[![Build](https://github.com/unpins/srt/actions/workflows/srt.yml/badge.svg)](https://github.com/unpins/srt/actions)
+[![CI](https://github.com/unpins/srt/actions/workflows/srt.yml/badge.svg)](https://github.com/unpins/srt/actions)
 ![Linux](https://img.shields.io/badge/Linux-✓-success?logo=linux&logoColor=white)
 ![macOS](https://img.shields.io/badge/macOS-✓-success?logo=apple&logoColor=white)
 ![Windows](https://img.shields.io/badge/Windows-✓-success?logo=windows&logoColor=white)
