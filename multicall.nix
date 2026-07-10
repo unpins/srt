@@ -116,10 +116,14 @@ let
       fi
 
       # Dispatcher (shared canonical generator — see nix-lib
-      # lib.multicallDispatcherC). It derives each app's C symbol from the applet
-      # name in multicall/apps.list via `tr -c 'A-Za-z0-9_' '_'`, matching the
-      # `tr '-' '_'` rename above (srt-live-transmit → srt_live_transmit).
-${lib.multicallDispatcherC { name = "srt"; }}
+      # lib.multicallTableDispatcherC). It reads multicall/applets.list as a TSV
+      # (tool<TAB>san); san = `tr '-' '_'`, matching the rename above
+      # (srt-live-transmit → srt_live_transmit).
+      : > multicall/applets.list
+      for a in "''${apps[@]}"; do
+        printf '%s\t%s\n' "$a" "$(echo "$a" | tr '-' '_')" >> multicall/applets.list
+      done
+${lib.multicallTableDispatcherC { name = "srt"; }}
       $CC -O2 -c -o multicall/dispatcher.o multicall/dispatcher.c
 
       # Reuse the first app's resolved link.txt verbatim (exact compiler, flags,
