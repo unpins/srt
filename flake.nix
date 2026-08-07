@@ -62,35 +62,11 @@
       build = pkgs:
         let
           eng = engStdenv pkgs;
-          isDarwin = pkgs.pkgsStatic.stdenv.hostPlatform.isDarwin;
-          # darwin: nixpkgs' mbedtls hardcodes -DCMAKE_C_FLAGS=-fzero-init-
-          # padding-bits=unions (a GCC-15 flag). On Linux mbedtls builds under
-          # gcc (which has it); on darwin the engine builds it with the unpin
-          # clang, which rejects the GCC-only flag → strip it (darwin only, so
-          # Linux/cross keep their hash).
-          sp = pkgs.pkgsStatic.extend (_: prev: pkgs.lib.optionalAttrs isDarwin {
-            mbedtls = prev.mbedtls.overrideAttrs (o: {
-              cmakeFlags = builtins.filter
-                (f: f != "-DCMAKE_C_FLAGS=-fzero-init-padding-bits=unions")
-                (o.cmakeFlags or [ ])
-                # mbedtls' demo programs and test suite build with -Werror; on
-                # darwin pkgsStatic's inert `-static-libgcc` trips -Wunused-command-
-                # line-argument → fatal. We link only the libmbed*.a, never the
-                # demos/tests, so skip building them entirely.
-                ++ [ "-DENABLE_PROGRAMS=OFF" "-DENABLE_TESTING=OFF" ];
-              # nixpkgs' mbedtls postConfigure runs `perl scripts/config.pl set …`
-              # to enable threading. Under the darwin engine cmake builds
-              # out-of-source (CWD = build/, scripts/ a level up) whereas Linux
-              # builds in-source, so the relative path fails. Run it from wherever
-              # scripts/config.pl actually is, then return.
-              postConfigure = ''
-                __d=$PWD
-                [ -f scripts/config.pl ] || cd ..
-                ${o.postConfigure or ""}
-                cd "$__d"
-              '';
-            });
-          });
+          # mbedtls' darwin fixes (the GCC-only -fzero-init-padding-bits flag and
+          # the out-of-source `scripts/config.pl` path) live in nix-lib's
+          # native-overlay, which autoWires into this very pkgsStatic — a copy
+          # here nests on top of it.
+          sp = pkgs.pkgsStatic;
         in
         withApps ((ulib.nativeFixes.srt sp).override { stdenv = eng; });
 
