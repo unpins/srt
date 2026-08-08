@@ -13,17 +13,15 @@
   # `nativeFixes.srt` swaps OpenSSL → mbedtls and turns the apps off (ffmpeg
   # only wants libsrt); here we turn them back on.
   #
-  # Native (Linux/darwin): build under the unpin-llvm engine (all objects LLVM
-  # bitcode) and let mkStandaloneFlake's bitcode self-fold pack the three apps
-  # into one binary. The apps are C++ → requires.cxx makes the fold link
-  # libc++/libstdc++ statically (Linux pkgsStatic already does; on darwin it
-  # folds static libc++ instead of the forbidden /usr/lib/libc++.1.dylib).
-  # Windows (mingw, no engine → native objects) still uses ./multicall.nix's
-  # objcopy fold, and drops srt-tunnel (upstream: no C++11 <thread>).
+  # Every target builds under the unpin-llvm engine (all objects LLVM bitcode)
+  # and lets mkStandaloneFlake's bitcode self-fold pack the apps into one
+  # binary. The apps are C++ → requires.cxx makes the fold link libc++/libstdc++
+  # statically (Linux pkgsStatic already does; on darwin it folds static libc++
+  # instead of the forbidden /usr/lib/libc++.1.dylib). Windows ships two applets:
+  # upstream's CMake skips srt-tunnel on mingw (no C++11 <thread> there).
   outputs = { self, unpins-lib }:
     let
       ulib = unpins-lib.lib;
-      mk = pkgs: extra: import ./multicall.nix { lib = pkgs.lib // ulib; } extra;
 
       # C++, lto + link capture so the self-fold can relink the three apps.
       engStdenv = pkgs:
@@ -51,10 +49,13 @@
 
       engine = "unpin-llvm";
       multicall = {
+        windows = true;
         programs = [
           { name = "srt-live-transmit"; }
           { name = "srt-file-transmit"; }
-          { name = "srt-tunnel"; }
+          # Upstream's CMake builds no srt-tunnel on mingw, so it must not be
+          # announced on the .exe either — an applet the dispatcher can't reach.
+          { name = "srt-tunnel"; supportedTarget = p: !(p.isMinGW or false); }
         ];
         requires.cxx = true;
       };
@@ -70,18 +71,9 @@
         in
         withApps ((ulib.nativeFixes.srt sp).override { stdenv = eng; });
 
-      # mingw drops srt-tunnel (upstream: no C++11 <thread>), so Windows ships a
-      # 2-applet multicall. The apps are C++ → force the runtime static so the
-      # .exe carries no libstdc++-6/libgcc_s/libmcfgthread DLLs. Drive the
-      # combined link through lld (-fuse-ld=lld): binutils 2.44 discards the
-      # cxx11 COMDAT members in the combined PE link, leaving them undefined;
-      # lld's PE/COFF COMDAT handling links them cleanly. Same fix as heif.
+      # mingw cross. No per-package stdenv swap: multicall.windows = true puts
+      # the whole set on the engine adapter already.
       windowsBuild = pkgs:
-        let cross = ulib.mingwStaticCross pkgs; in
-        mk pkgs {
-          pkgs = cross;
-          srt = ulib.nativeFixes.srt cross;
-          extraLinkFlags = "-static -static-libgcc -static-libstdc++ -fuse-ld=lld";
-        };
+        withApps (ulib.nativeFixes.srt (ulib.mingwStaticCross pkgs));
     };
 }
