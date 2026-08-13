@@ -50,4 +50,4 @@ The [Releases](https://github.com/unpins/srt/releases) page has standalone binar
 - **Windows:** `mingw` cross, single `.exe`, no companion DLLs. Ships 2 applets — upstream excludes `srt-tunnel` (no C++11 `<thread>`).
 - **No man pages** — SRT ships none; run any applet with `--help`.
 
-Platform fixes live in [`nix-lib/native-overlay/srt.nix`](https://github.com/unpins/nix-lib/blob/main/native-overlay/srt.nix); the multicall link recipe is in [`multicall.nix`](./multicall.nix).
+Platform fixes live in [`nix-lib/native-overlay/srt.nix`](https://github.com/unpins/nix-lib/blob/main/native-overlay/srt.nix). The programs are folded into one binary by the unpin-llvm engine on every platform, Windows included.
