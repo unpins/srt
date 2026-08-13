@@ -46,6 +46,8 @@
       inherit self;
       dnsFallback = true; # resolves hostnames; opt into the Android DNS fallback
       name = "srt";
+      smoke = [ "--unpin-program=srt-live-transmit" "-version" ];
+      smokePattern = "SRT Library version: [0-9]+\\.[0-9]+";
 
       engine = "unpin-llvm";
       multicall = {
