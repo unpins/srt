@@ -53,11 +53,12 @@
       multicall = {
         windows = true;
         programs = [
-          { name = "srt-live-transmit"; }
-          { name = "srt-file-transmit"; }
+          # srt installs no man pages at all.
+          { name = "srt-live-transmit"; noMan = true; }
+          { name = "srt-file-transmit"; noMan = true; }
           # Upstream's CMake builds no srt-tunnel on mingw, so it must not be
           # announced on the .exe either — an applet the dispatcher can't reach.
-          { name = "srt-tunnel"; supportedTarget = p: !(p.isMinGW or false); }
+          { name = "srt-tunnel"; noMan = true; supportedTarget = p: !(p.isMinGW or false); }
         ];
         requires.cxx = true;
       };
