@@ -20,21 +20,24 @@ Low-latency, reliable transport of live streams over UDP. Ships as one binary pr
 Run a program with [unpin](https://github.com/unpins/unpin):
 
 ```bash
-unpin srt srt-live-transmit udp://:1234 srt://example:4201
-unpin srt srt-file-transmit --help
+unpin srt --unpin-program=srt-live-transmit udp://:1234 srt://example.com:4201
+unpin srt --unpin-program=srt-file-transmit file:///path/to/video.ts srt://example.com:4201
 ```
 
-`unpin install srt` also creates the commands `srt-live-transmit`, `srt-file-transmit` and `srt-tunnel` (the last on Linux / macOS only):
+Or install them and call each by name, which is usually what you want:
 
 ```bash
 unpin install srt
+srt-live-transmit udp://:1234 srt://example.com:4201
 ```
+
+`unpin install srt` creates the `srt-live-transmit`, `srt-file-transmit` and `srt-tunnel` commands (`srt-tunnel` on Linux and macOS only).
 
 ## Build locally
 
 ```bash
 nix build github:unpins/srt
-./result/bin/srt
+./result/bin/srt --unpin-program=srt-live-transmit -version
 ```
 
 The first invocation will offer to add the [unpins.cachix.org](https://unpins.cachix.org) substituter so most pulls come pre-built.
@@ -45,9 +48,7 @@ The [Releases](https://github.com/unpins/srt/releases) page has standalone binar
 
 ## Build notes
 
-- **Single multicall binary** — the three apps are post-linked into one `srt`; applet names are recreated as `argv[0]` shims on install.
-- **mbedtls, not OpenSSL** — smaller crypto closure; AES-encrypted streams work unchanged.
-- **Windows:** `mingw` cross, single `.exe`, no companion DLLs. Ships 2 applets — upstream excludes `srt-tunnel` (no C++11 `<thread>`).
-- **No man pages** — SRT ships none; run any applet with `--help`.
-
-Platform fixes live in [`nix-lib/native-overlay/srt.nix`](https://github.com/unpins/nix-lib/blob/main/native-overlay/srt.nix). The programs are folded into one binary by the unpin-llvm engine on every platform, Windows included.
+- **One binary, `srt`,** holds the programs; `unpin install` creates a command for each.
+- **Encryption uses mbedtls** instead of OpenSSL; AES-encrypted streams (`passphrase=`) work unchanged.
+- **Windows:** a single `.exe`, no companion DLLs, with `srt-live-transmit` and `srt-file-transmit` — upstream doesn't build `srt-tunnel` for Windows.
+- **No man pages** — SRT ships none; run a program with `-help`.
